@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.9
+
 A new icon: the app's own Waze arrow with a small TJM logo badge.
 
 ## 0.6.8
