@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+A new icon: the app's own Waze arrow with a small TJM logo badge.
+
 ## 0.6.8
 
 A plainer description in the Store: on supported cars the map turns on by
