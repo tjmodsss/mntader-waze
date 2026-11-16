@@ -5,6 +5,18 @@
 ## 0.6.9
 
 A new icon: the app's own Waze arrow with a small TJM logo badge.
+## 0.6.10
+
+Waze on cluster is renamed Maps on cluster, with its name translated in
+every language, since it shows the map of Waze, Google Maps or Apple Maps.
+Your settings stay as they are.
+
+## 0.6.9
+
+CarPlay's Status shows `Update needed` while the CarPlay patch on the car
+lacks the arrival time on the cluster map; its Patch button adds it. With
+the patch, Apple Maps and Google Maps show your arrival time on the cluster
+during a route.
 
 ## 0.6.8
 
