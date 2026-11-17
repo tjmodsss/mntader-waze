@@ -2,20 +2,15 @@
 
 ## Unreleased
 
+Apple Maps and Google Maps keep their arrival time, road names and turn
+card inside the part of the cluster map you can see, from the next
+head-unit start. The background tool is now called Maps on cluster, since
+it shows the map of Waze, Google Maps or Apple Maps; the app stays TJM Waze
+Cluster and your settings stay as they are.
+
 ## 0.6.9
 
 A new icon: the app's own Waze arrow with a small TJM logo badge.
-## 0.6.11
-
-Apple Maps and Google Maps keep their arrival time, road names and turn
-card inside the part of the cluster map you can see, from the next
-head-unit start.
-
-## 0.6.10
-
-Waze on cluster is renamed Maps on cluster, with its name translated in
-every language, since it shows the map of Waze, Google Maps or Apple Maps.
-Your settings stay as they are.
 
 ## 0.6.9
 
