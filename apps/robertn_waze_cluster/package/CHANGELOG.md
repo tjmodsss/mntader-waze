@@ -5,6 +5,12 @@
 ## 0.6.9
 
 A new icon: the app's own Waze arrow with a small TJM logo badge.
+## 0.6.11
+
+Apple Maps and Google Maps keep their arrival time, road names and turn
+card inside the part of the cluster map you can see, from the next
+head-unit start.
+
 ## 0.6.10
 
 Waze on cluster is renamed Maps on cluster, with its name translated in
