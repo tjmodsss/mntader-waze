@@ -7,12 +7,12 @@
 Apple Maps and Google Maps keep their arrival time, road names and turn
 card inside the part of the cluster map you can see, from the next
 head-unit start. The background tool is now called Maps on cluster, since
-it shows the map of Waze, Google Maps or Apple Maps; the app stays TJM Waze
+it shows the map of Waze, Google Maps or Apple Maps; the app stays MNTADER Waze
 Cluster and your settings stay as they are.
 
 ## 0.6.9
 
-A new icon: the app's own Waze arrow with a small TJM logo badge.
+A new icon: the app's own Waze arrow with a small MNTADER logo badge.
 
 ## 0.6.9
 
@@ -51,7 +51,7 @@ The Store shows the app's icon while it is not installed.
 
 ## 0.6.4
 
-- TJM: the tile reads "TJM Waze Cluster" in every language, with the TJM icon.
+- MNTADER: the tile reads "MNTADER Waze Cluster" in every language, with the MNTADER icon.
 
 Map settings per driver profile, after eroobeeroo's #41. Show on, the HUD
 map's size and its position stay shared by every driver profile; Own
