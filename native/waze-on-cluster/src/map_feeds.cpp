@@ -6,25 +6,10 @@
 
 namespace woc {
 
-namespace {
-
-/* The renderer target a cluster target names: "map" ("sail" too) or
- * "panel"; empty for anything else (the HUD is its own setting). */
-std::string cluster_target(const std::string &name)
-{
-    return name == "map" || name == "sail" ? "map" : name == "panel" ? name : std::string();
-}
-
-}  // namespace
-
 MapFeeds::MapFeeds(const FeedConfig &base, bool cluster, bool hud, unsigned hud_fps)
     : base_(base), hud_fps_(hud_fps), cluster_on_(cluster), hud_on_(hud)
 {
-    base_.target = cluster_target(base.target);
-    if (base_.target.empty()) {
-        log_error("target %s is not the cluster's (map, panel); using map", base.target.c_str());
-        base_.target = "map";
-    }
+    base_.target = "map";
     if (base_.hud_width_pct > kHudMaxPct)
         base_.hud_width_pct = kHudMaxPct;
     follow();
@@ -42,6 +27,8 @@ void MapFeeds::follow()
         /* the HUD's frames go exact, into debt, and wait while the HUD's
          * share is in debt: no packing on the renderer's thread for the HUD */
         fc.video.pan_blocks = false;
+        fc.vpp_scale = false;   /* the HUD scales whole frames */
+        fc.always_packed = false;   /* and goes exact (cluster map only) */
         hud_.reset(new MapFeed(fc));
         hud_->set_stream(live_, frozen_, picture_);
         hud_->changed(id_);
@@ -69,16 +56,6 @@ void MapFeeds::follow()
         copy_ = std::vector<uint8_t>();
         log_info("hud: off");
     }
-}
-
-bool MapFeeds::set_target(const std::string &name)
-{
-    const std::string t = cluster_target(name);
-    if (t.empty() || (cluster_ && !cluster_->set_target(t)))
-        return false;
-    base_.target = t;
-    follow();
-    return true;
 }
 
 void MapFeeds::set_cluster(bool on)
@@ -175,6 +152,13 @@ void MapFeeds::offer(std::vector<uint8_t> *atlas, uint64_t id, int64_t now_ms)
     if (hud_)
         hud_->changed(id);
     feed_hud(now_ms);
+}
+
+void MapFeeds::offer_part(std::vector<uint8_t> *atlas, uint64_t id, const OutputPart &part, int64_t now_ms)
+{
+    id_ = id;
+    if (cluster_)
+        cluster_->offer_part(atlas, id, part, now_ms);
 }
 
 void MapFeeds::repeat(uint64_t id, int64_t now_ms)

@@ -74,7 +74,10 @@ restores the original binary before CarPlay (or aapd) starts: after one
 failed start for a patch not yet proven on that car, after two for a proven
 one. CarPlay comes back without the map, its Status reads `Removed — head
 unit kept restarting`, and its Patch button applies the patch again
-(PATCH.md "Boot recovery").
+(PATCH.md "Boot recovery"). Android Auto's patch is removed at the first
+crash of the patched aapd, and aapd is started again after every end, so
+Android Auto comes back without the cluster map; the patch stays off until
+its Patch button applies it or an update brings a newer patch.
 
 To break a loop by hand: keep the phone from connecting (unplug it, or turn
 off its Wi-Fi and Bluetooth), then over SSH run
@@ -110,19 +113,25 @@ unless **Keep HUD map over BMW's pop-ups** is ticked. **Own settings for
 this driver** gives the driver profile in use its own copy of these
 settings.
 
-From a shell, `waze-on-cluster -c <conf> run map|panel` sets the cluster
-target until the service restarts and prints the status.
-
 **Inside another app's scene.** An app that shows a scene file on a target
 with `layers` 1 can host the map there (cluster-render PROTOCOL.md
 "Hosting another target"): the map is then drawn only in the rect it
-names, scaled on the head unit to that part of the picture.
+names, scaled on the head unit to that part of the picture. With
+`hosted_vpp_scale = 1` the GPU does that scaling instead ("Experimental:
+hosted_vpp_scale and always_packed" below).
 
 ### Settings
 
-Settings are in `waze-on-cluster.conf` (documented inline). Overrides go in
-`/var/opt/waze-on-cluster/waze-on-cluster.local.conf`, which updates keep;
-the app's map settings are in `/var/opt/waze-on-cluster/map.state.conf`.
+Settings are in `waze-on-cluster.conf` (documented inline), which each
+install writes anew. Besides it and the command line (the Android Auto
+crop, PATCH.md), the service reads only the app's saved choices
+(`/var/opt/waze-on-cluster/map.state.conf` and the turn-box setting) and
+the opt-in settings in `/var/opt/waze-on-cluster/features.conf`. On the
+cluster the map goes on its map slot, or into a hosting app's scene.
+
+`/var/opt/waze-on-cluster/waze-on-cluster.local.conf`, which versions up to
+0.10.9 read, is not read; it stays on the unit for a downgrade, and the log
+names it at each start.
 
 ### Map size and upload
 
@@ -135,10 +144,80 @@ The map covers the cluster's central map area, 1088x480 on the 1920x720
 panel. The patch advertises exactly that, so `tex_size` must equal it.
 `src_crop` takes part of a picture of one size and scales it to `tex_size`
 (Android Auto's 1280x720 stream has its map in the top 1280x564).
-`map_rect` draws the map stretched into a rect of the current target.
+`map_rect` draws the map stretched into a rect of the map slot.
 `target_fps` (30) caps the frame rate; `picture_fps` (0: every frame) makes
 at most that many pictures a second, which saves CPU when the phone sends
 more than the cluster takes (set it to `target_fps` then).
+`always_packed = 1` sends fewer bytes for the same map ("Experimental:
+hosted_vpp_scale and always_packed" below).
+
+### Experimental: hosted_vpp_scale and always_packed
+
+Two settings for a head unit that is short of CPU or of upload to the
+cluster, for example while an app hosts the map in its own scene. Both are
+0 (off) by default, and with 0 nothing changes.
+
+| Key | What it does | When it helps | Cost |
+|---|---|---|---|
+| `hosted_vpp_scale` | While an app hosts the map and the HUD map is off, the decoder's VPP crops the host's part of each picture and scales it to the size shown, on the GPU. The CPU then copies and packs only that part and scales nothing. | A hosted map: the CPU neither copies the whole 1088x480 frame nor scales it. | VPP's scaling looks a little different from the CPU's. |
+| `always_packed` | Every update of the cluster's map, in its own slot or hosted, goes as packed 4x4 colour blocks, never the exact picture. Only the blocks that changed are sent, at most 64 rects an update. The whole packed picture goes once when the map's layer starts (a new stream, a new size, a host moving it). A still map sends nothing. The HUD map is not affected. | Little upload to spare: about a third of the exact bytes, or less, for the same change. | A slightly softer picture: thin lines and small text show the 4x4 blocks. |
+
+They can be used alone or together; with both, the GPU-made part is packed.
+
+**Turning them on.** Add the lines to `/var/opt/waze-on-cluster/features.conf`,
+which updates keep and earlier versions do not read:
+
+```
+hosted_vpp_scale = 1
+always_packed = 1
+```
+
+They take effect when waze-on-cluster next starts (the next head-unit
+start). A restart of the service applies them at once, but the map stays
+blank until the phone connects again.
+
+patchd moves any it finds in `waze-on-cluster.local.conf` to
+`features.conf`, so a downgrade never meets them there.
+
+**What they need.**
+- Both: a waze-on-cluster whose `waze-on-cluster.conf` has the key. An older
+  one does not read `features.conf` and sends the map as with 0.
+- `hosted_vpp_scale`: only acts while an app hosts the map (cluster-render
+  PROTOCOL.md "Hosting another target") and the HUD map is off. Otherwise
+  the map goes as with 0.
+- `always_packed`: a cluster-render whose hello has `always_packed`
+  (PROTOCOL.md), `pan_blocks = 1`, and a map (or host's part) whose width
+  and height are multiples of 4. waze-on-cluster reads the hello at every
+  connection, so a cluster-render updated later is picked up when it
+  reconnects.
+
+**Checking they work.** In the log ("Logs" below):
+- `decoder: VPP makes the output's WxH at X,Y as WxH (hosted_vpp_scale)`:
+  the GPU makes the host's part.
+- `render: map layer on ... every update packed (always_packed)`: the map is
+  packed.
+
+If one cannot be used, the log says why once, and the map goes as with 0:
+- `decoder: VPP cannot make ...`: the part is an odd size, outside the
+  frame, more than 8 times smaller than its rect, or VPP failed. That
+  stream's pictures are scaled on the CPU.
+- `render: always_packed: the map's WxH not packed, ...`: the size is not
+  a multiple of 4, or cluster-render does not take it.
+
+**Side effects of `hosted_vpp_scale`.**
+- The freeze watch and the minute's tally judge a blank or frozen picture
+  by the part shown, not the whole frame.
+- A host moving the map, the map going back to its own slot when the host
+  drops it, and the HUD map turning on all show the map from the phone's
+  next frame.
+
+**Apps that host the map** can turn these on for their users by writing the
+lines into `features.conf`, never over a value the owner set. Remove the
+lines when the app is removed.
+
+Not yet measured on a car: the unit's VPP with a part, the packed picture
+and the CPU and GPU cost. `waze-on-cluster.conf` has the details for each
+key.
 
 ### Logs
 
@@ -190,6 +269,7 @@ for experiments and for undoing the patches without the app:
 |---|---|
 | `status`, `aa-status` | what is on disk |
 | `probe` | where the edit sites are in a carplay binary and whether it is patchable, without writing |
+| `aa-probe [<file>]` | the same for aapd (`/usr/bin/aapd` by default) |
 | `verify` | whether carplay's patch is complete |
 | `revert [--force]` | restores the original carplay; `--force` over another build (a firmware update) |
 | `aa-revert [--force]` | restores the original aapd and aapd.conf |

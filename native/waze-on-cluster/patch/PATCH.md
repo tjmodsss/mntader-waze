@@ -268,8 +268,8 @@ change:
 |---|---|---|---|
 | mm (→ `+0x10`) | `0x20ca32` | `ea000000 6e000000` (234x110) | `8a000000 3d000000` (138x61) |
 | px (→ `+0x08`, `+0x18`) | `0x20ca54` | `80070000 84030000` (1920x900) | `40040000 e0010000` (1088x480) |
-| view x,y (u16) + safe width | `0x20ca66` | `00000000 64020000` | `00000000 dc010000` |
-| safe height + safe x,y (u16) | `0x20ca74` | `0e020000 0202c000` | `32010000 32014800` |
+| view x,y (u16) + safe width | `0x20ca66` | `00000000 64020000` | `00000000 f8010000` |
+| safe height + safe x,y (u16) | `0x20ca74` | `0e020000 0202c000` | `70010000 1e014800` |
 
 The getters at `0x20ce00`–`0x20cf40` read these fields; the config built from
 them (`0x2078f1`) is what `SetVideoParams` and the view-area report carry.
@@ -296,9 +296,9 @@ through one-field getters: `+0x18` (pixel size), `+0x20`, `+0x22` (view x,
 y), `+0x24` (safe width and height), `+0x2c`, `+0x2e` (safe x, y).
 
 This tool's geometry has its 138x61 mm physical size, the view area at (0,0)
-and a safe area inside the frame, so the safe area 0.5.0–0.10.5 wrote
-(504x368 at (286, 72): `f8010000` and `70010000 1e014800`) reads as patched
-and an apply rewrites it. A stock geometry has another physical size and a
+and a safe area inside the frame, so the safe area 0.10.6 wrote (476x306
+at (306, 72): `dc010000` and `32010000 32014800`) reads as patched and an
+apply rewrites it. A stock geometry has another physical size and a
 safe area inside the frame; any other geometry is not recognised.
 `--res stock` and `--panel mid` write the backup's stock immediates back.
 
@@ -309,18 +309,17 @@ and keeps its UI, such as the manoeuvre banner, inside the safe area; a car
 capture of the stock geometry shows exactly that. With a full-frame safe area
 the banner lands in the top-left corner, under the cluster's gauge mask.
 
-The default safe area is **476x306 at (306, 72)** (x 306–782, y 72–378),
-the part of the map slot the driver sees in full:
+The default safe area is **504x368 at (286, 72)** (x 286–790, y 72–440):
 
-- The cluster draws a mask over the slot that fades the map out towards
-  the gauges and the bottom frame. The safe area lies where the mask shows
-  at least 90% of the map (its bottom corners, rounded as the phone rounds
-  its cards, 91%), centred on the mask. Below y ≈ 400 the mask fades the map
-  quickly: at y 440 it shows 72% of the middle and half at x 300 and 789.
-- y 72 is below the native model badge, which covers the top of the slot to
+- x: BMW's own IC_MID safe area (504x456 at (708, 153) on the panel) lies
+  inside the map area at (422, 134); in map-area coordinates it spans
+  x 286–790, between the native speed readout (to x ≈ 170) and consumption
+  readout (from x ≈ 800).
+- y: below the native model badge, which covers the top of the area to
   y ≈ 64.
-- Google Maps draws its arrival-time card only in a safe area at least
-  about 296 rows high (none at 290); 306 keeps a margin.
+
+A smaller safe area, such as 476x306 at (306, 72), makes Apple Maps show a
+black cluster map or its turn card alone.
 
 `--safe WxH+X+Y` writes another (at least 16x16, inside the frame), `--safe
 full` the whole frame; `--res` scales the default. `patchd` reports `res` and
@@ -744,6 +743,7 @@ version patched (`rollback_test.js` runs each one from its release tag):
 | 0.9.11 (E) | stock | Edits 1–5 restored, Edit 6 left | Edits 1–5 written, Edit 6 kept |
 | 0.9.12–0.10.1 (F) | stock | as E | as E |
 | 0.10.2–0.10.3 (G) | stock | as E | Edits 1–4 and Edit 5 with the URL with ETA written, Edit 6 kept |
+| 0.10.4–0.10.6 (H) | stock | stock | 0.10.4–0.10.5: nothing to write; 0.10.6: its safe area 476x306 written |
 
 Every release reads this version's Edit 4 as patched (138x61 mm, a safe
 area inside the frame), and its activate writes its own safe area. A and B
@@ -800,7 +800,18 @@ start), a site a dynamic relocation covers refused. A build where a site is
 not found, is found more than once or fails a check is refused with the
 reason; `patchd` reports it as `not patchable: <reason>` (`Status: Not
 supported on this car` in the app's Android Auto section). Each check has a
-name in `aapd_locate.js` (`CHECKS`).
+name in `aapd_locate.js` (`CHECKS`), and `aapd_locate_test.js` shows for
+each one a changed build that it alone refuses. The checks tie the sites to
+each other, not to a build: the gate's kept result must be the flag that
+turns the cluster display code on, the self-start's fields must be those
+the session start and end set, and its opening test must read the object
+its function was called with. No list of builds decides it: a build of
+another version patches when its code has the same shape. Before writing,
+`apply` locates its own edited copy again, and writes nothing unless every
+site reads patched at the same offsets. `aapd_patch.js probe [<file>]`
+prints each site's offset, its bytes on disk and both forms, or why it is
+not found, the backup's and the running copy's SHA-256 and the patch
+record; Save logs includes it (`aapd-probe.txt`).
 
 **Proven builds**, listed by build-id in `aapd_patch.js`: the first edit
 needs the whole file to be the shipped one. Another build counts as
@@ -847,7 +858,7 @@ In the proven build:
 |---|---|---|---|
 | gate | `0x998bd` | `83bb1c020000 01` (`cmp dword [rbx+0x21c],1`) | `…02` |
 | selfstart call | `0x1d43eb` | `e800f8ffff` (`call setNaviStreamStatus`) | `e840fbffff` (`call requestStream`) |
-| selfstart guard | `0x1d3f5d` | `0f848d000000` (`je 0x1d3ff0`) | `e98e00000090` (`jmp 0x1d3ff0 ; nop`) |
+| selfstart guard | `0x1d3f53` | `837b3802 740a 837b4402 0f848d000000` (`cmp dword [rbx+0x38],2 ; je L1 ; cmp dword [rbx+0x44],2 ; je 0x1d3ff0`) | `807b4100 740a 837b3802 0f858d000000` (`cmp byte [rbx+0x41],0 ; je L1 ; cmp dword [rbx+0x38],2 ; jne 0x1d3ff0`) |
 | screen | `0x15b440` | `660fefc0 ebe1 662e0f1f840000000000` | `83f802 740b 660fefc0 ebdc 0f1f440000` |
 
 - **gate.** `Application::secondVideoEnabled()` returns `featureFlag &&
@@ -858,10 +869,27 @@ In the proven build:
   then waits for a `ProjectedModeRequestStreamCommand` the car never sends,
   as CarPlay waits for NavController. `onNewNavigationStatus()`'s shared
   tail calls `requestStream(this)` instead of `setNaviStreamStatus(this,
-  status)` (the extra argument is unused), and `requestStream()` no longer
-  waits on the `[rbx+0x44] == 2` a `StreamCommandChanged` event would set;
-  its own check that it is not streaming already (`[rbx+0x38] != 2`) stays,
-  and it still calls `setNaviStreamStatus(STREAMING)`. The two go together.
+  status)` (the extra argument is unused), on every status but rerouting
+  and active while streaming. `requestStream()` sets the stream status to
+  STREAMING and calls the cluster display's
+  `SetVideoFocus(PROJECTED, unsolicited)`, whose error
+  `throwOnCinemoError` throws and nothing catches: aapd aborts. Cinemo
+  refuses that call until the phone has set the cluster display up
+  (`Unable to SetVideoFocus() without active player or correct
+  configuration!`), as before a session, before the phone's display is
+  ready, after the session ends or with a phone that offers no cluster
+  display. Stock, the call can come only from the car's request, to which
+  aapd subscribes in `onAlternateVideoReady()`. So the edit replaces
+  requestStream's opening test, not streaming (`[rbx+0x38] != 2`) and the
+  focus mode native (`[rbx+0x44] == 2`), with: the cluster display ready
+  (`[rbx+0x41]`, which `onAlternateVideoReady()` sets and `onEndSession()`
+  clears) and not streaming. Before that, it logs `Ignoring event. Already
+  streaming...` and returns; the next navigation status after the display
+  is ready starts the stream. The focus mode test goes, so a stream the
+  phone's main-display focus change marked ERROR starts again at the next
+  status. The two go together. Releases up to 0.10.10 made the focus test
+  a `jmp` and kept no readiness test; the locator reads that guard as
+  `outdated`, and an install replaces it with this one.
 - **screen.** `loadKombiDisplayDefinition()` turns the class into the screen
   size it looks up in aapd.conf (`0x15b400`: 0 → 12.3, 1 → 10.25, else
   0.0); with 0.0 it skips aapd.conf and sends an 800x480 stream with the UI
@@ -891,12 +919,21 @@ In the proven build:
   its result as a byte of its object. No other code compares the field with
   1 or 2.
 - *selfstart*: `requestStream()`, which `onStreamCommandChanged()` calls,
-  opens with `cmp [this+A],2 ; je +10 ; cmp [this+B],2 ; je Ldo` (or the
-  patched `jmp Ldo ; nop`); before `Ldo` it logs `Ignoring event. Already
-  streaming...`, after it `Request Stream Command event received`, calls
-  `setNaviStreamStatus(STREAMING)` (2) and sets `B` to 1.
+  copies `rdi` (its `this`) into the register its opening test reads and
+  opens with `cmp [this+A],2 ; je +10 ; cmp [this+B],2 ; je Ldo`, or the
+  patched `cmp byte [this+F],0 ; je +10 ; cmp [this+A],2 ; jne Ldo`, or
+  the outdated `... ; jmp Ldo ; nop`; before `Ldo` it logs `Ignoring
+  event. Already streaming...`, after it `Request Stream Command event
+  received`, calls `setNaviStreamStatus(STREAMING)` (2) and sets `B` to 1.
+  `onAlternateVideoReady()` sets one byte field `F` to 1 and calls
+  `subscribeEvents()`; `onEndSession()` sets `F` to 0, `A` to 0 and `B`
+  to 2; the patched test must read that `F`, and in the patched form `B` is
+  the field set to 1 after the call that `onEndSession()` sets to 2.
   `setNaviStreamStatus` copies its argument's value (`[rsi+X]`) into `A`;
   where the build has its name string, it is the function loading it.
+  The gate's kept result (a byte of the Application) is tested by
+  `initAlternateDisplays()`, which builds the cluster display, and before
+  every branch into `onNewNavigationStatus()` (within 0x40 bytes of it).
   `onNewNavigationStatus()` calls `setNaviStreamStatus` (stock) or
   `requestStream` (patched) exactly once: that call. On every path to it,
   `rsi` holds `rsp+B`, its value followed through the function by
@@ -948,9 +985,9 @@ unknown. The edit:
 
 - a 1280x720 stream with the UI in its top 1280x564 (margins 0x156 at
   0,0), the map slot's 2.27:1;
-- the safe area 592x432 at (336, 84): 504x368 at (286, 72) of the map
-  slot at the stream's scale, between the gauges and below the model
-  badge, where Maps pins its turn card;
+- the safe area 592x432 at (336, 84): the CarPlay safe area of the map
+  slot, 504x368 at (286, 72), at the stream's scale, so the turn card stays
+  where the gauges leave the slot clear;
 - the density chosen (150–400 dpi in steps of 10, 180 by default; kept in
   `/var/opt/waze-on-cluster/aa-density`). A lower one makes the phone take
   the screen for a larger one: more map, smaller text.
@@ -988,7 +1025,7 @@ needs 2 x 7.4 MB free on `/` (the backup and the temporary copy) plus 1 MiB,
 read with `df`, or it refuses.
 
 `revert` needs no locator. aapd is restored over a file of the backup's
-build (the same size and build-id, or at most 68 bytes apart without one):
+build (the same size and build-id, or at most 88 bytes apart without one):
 the edits' bytes only when the locator reads it and the pristine backup as
 the same build at the same sites, else the whole backup.
 aapd.conf is restored whole over a file that differs from the backup only in
@@ -1127,6 +1164,32 @@ starts aapd again as after a crash. The shutdown record writes such an end
 as `stopped`, so the boot step does not count it either. The watcher
 follows aapd only on a unit that has it.
 
+Android Auto differs in what follows an end, so that it is never left down
+and a failing patch is not tried again:
+
+- **A crash of the patched aapd restores the original at once**, the
+  first one, proven build or not: the watcher, where the head unit stays
+  up, then starts the original; the boot step, where the crash restarted
+  the head unit (the watcher saw it, or the shutdown record says
+  `failed`), before aapd starts. A failed start with no crash of aapd
+  recorded counts against the thresholds below, as for CarPlay. A crash of
+  the run that was up when a change waiting for the next start
+  (`aa-pending`) replaced its file is not counted: the start runs the file
+  on disk, and a crash of that run counts.
+- **aapd is started again after every end** the watcher sees where recmgr
+  loaded its entry this boot: a crash, a SIGKILL `patchd` did not send, and
+  a clean exit of a run that started (`ExecMainStartTimestampMonotonic`
+  above 0), 2 s, 5 s, 15 s and 30 s after the first four ends in a row,
+  then 60 s after each one, with no limit. A run active 60 s makes the
+  next start 2 s again. A start that fails is tried again the same way.
+- **The patch stays off** while the patch record names the restore: an
+  install leaves it off, unless its patch revision (`aapd_patch.js`
+  `PATCH_REV`, kept in the patch record as `rev`, 1 when there is none) is
+  newer than the removed patch's; Android Auto's Patch button applies it
+  again. `patchd` reports the restore as `recovered` with
+  `recoveredWhy`: `crash` (the patched aapd crashed) or `boot` (failed
+  head-unit starts).
+
 **What is recorded.**
 
 - The patch record, `<target>.woc-patch.json` (`patch_record.js`), beside
@@ -1135,7 +1198,8 @@ follows aapd only on a unit that has it.
   with nothing to write when the file has changed since the record was
   written, or there is none), by the watcher when a patch on trial ran
   healthy (below), by the restore below with `by: "recovery"`,
-  `at` and `fails` after failed starts, or `by: "refused"` and `at` on a
+  `at`, `fails`, `why` (`crash` or `boot`) and `rev` (the removed patch's
+  revision) after failed starts or a crash, or `by: "refused"` and `at` on a
   head unit that refuses our parts, and removed with the backup. It describes the target while its inode, size and
   modification time are the recorded ones. For aapd `proven` is whether
   the build is its one known build. For carplay it is true only for a
@@ -1148,8 +1212,8 @@ follows aapd only on a unit that has it.
   URL; earlier releases wrote `mapurl: true` for Edit 5's URL, the URL
   with ETA as a string, and no `showui`), and in `res` the geometry Edit 4
   advertised (pixel size, size in mm and safe area, as
-  `1088x480/138x61/476x306+306+72`; `false` for the stock one; earlier
-  releases wrote none).
+  `1088x480/138x61/504x368+286+72`; `false` for the stock one; releases
+  before 0.10.6 wrote none).
 - `/var/opt/waze-on-cluster/boot-recovery.json`, written whole: a
   temporary file, fsync'd, renamed over it, the folder fsync'd. A write
   that fails leaves the previous state as it was. It holds:
@@ -1290,8 +1354,8 @@ writes a geometry of its own other than the one that ran, to a patch that ran he
 without them as this version writes them, or after the revert of such a
 patch (a revert record whose `mapurl`, `showui` or `res` is not what this
 version writes, as every earlier release wrote), is on trial, since no
-healthy run with them was seen. An update from 0.10.5 or earlier, which
-wrote another safe area, is therefore on trial. A
+healthy run with them was seen. An update from 0.10.6, which wrote another
+safe area, is therefore on trial. A
 revert of a proven patch records
 `healthy: true`, so the next apply of that build there is proven at once;
 a revert of one on trial, a restore by boot recovery, a removal (which
@@ -1390,7 +1454,7 @@ the next start. Where recmgr loaded its `carplay` entry this boot and the
 head unit stays up, for a patch at `fails` plus this start's crashes at the
 threshold the watcher restores the original, then starts CarPlay with
 `systemctl start carplay.service`, 5 s, 15 s and 60 s after a crash, at
-most three times per head-unit start, only while CarPlay is down, the
+most three times per head-unit start (aapd: after every end, above), only while CarPlay is down, the
 system is not stopping and `patchd` does not hold the remount lock. The run
 it starts is probed at the next tick. The watcher also runs the boot step's
 logic at its own start, so a start whose boot step did not run or finish is

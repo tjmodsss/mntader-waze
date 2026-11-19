@@ -103,7 +103,9 @@
  *                    failed: refused, stayed or error), reason, possibleAt
  *                    (while the restart limit holds: when one is taken again)}
  *                    recovered: n, while the original boot recovery restored
- *                    after n failed head-unit starts is on disk (also in aa)
+ *                    after n failed head-unit starts is on disk (also in aa,
+ *                    with recoveredWhy: crash when the patched aapd
+ *                    crashed, boot for failed head-unit starts)
  *                    wifi: {band: "5" | "2.4", iface, freq (MHz)} while
  *                    CarPlay runs over Wi-Fi and its band is known, else
  *                    null (wifi_band.js); a status goes out when it changes
@@ -234,7 +236,9 @@ var REBOOT_CMD = (process.env.WOC_REBOOT_CMD || '/usr/bin/nsm_control --requestR
 var REBOOT_CMD_TIMEOUT_MS = 30000;
 /* A restart NSM took that has not taken the unit down by then failed. */
 var REBOOT_WAIT_MS = parseInt(process.env.WOC_REBOOT_WAIT_MS, 10) || 180000;
-/* The unit's own render settings, which updates keep. */
+/* The local conf waze-on-cluster up to 0.10.9 reads over its configuration;
+ * later versions do not read it. It stays on the unit for a downgrade, kept
+ * one every release starts with (moveMapSettings, moveFeatures). */
 var LOCAL_CONF = process.env.WOC_LOCAL_CONF || '/var/opt/waze-on-cluster/waze-on-cluster.local.conf';
 /* Where the map shows and the HUD map's size, place and whether it stays
  * shown over BMW's pop-ups, as the app chose them: the render reads this file (its map_state_file) over its
@@ -242,13 +246,20 @@ var LOCAL_CONF = process.env.WOC_LOCAL_CONF || '/var/opt/waze-on-cluster/waze-on
  * start with any of MAP_KEYS in. */
 var MAP_STATE = path.join(STATE_DIR, 'map.state.conf');
 var MAP_KEYS = ['cluster', 'hud', 'hud_width_pct', 'hud_offset_x', 'hud_offset_y', 'hud_keep_shown'];
+/* The opt-in settings: the render reads this file (its features_file) over
+ * its configuration. Not in LOCAL_CONF, which every release up to 0.10.7
+ * refuses to start with any of FEATURE_KEYS in; no release before 0.10.9
+ * reads FEATURES. */
+var FEATURES = path.join(STATE_DIR, 'features.conf');
+var FEATURE_KEYS = ['hosted_vpp_scale', 'always_packed'];
 
-/* A key = value file's settings; none when it cannot be read. */
+/* A key = value file's settings (a key += value line's value as the key's);
+ * none when it cannot be read. */
 function readConf(file) {
     var conf = {};
     try {
         fs.readFileSync(file, 'utf8').split('\n').forEach(function (l) {
-            var m = /^\s*(\w+)\s*=\s*(.*?)\s*$/.exec(l);
+            var m = /^\s*(\w+)\s*\+?\s*=\s*(.*?)\s*$/.exec(l);
             if (m) conf[m[1]] = m[2];
         });
     } catch (e) {}
@@ -256,12 +267,13 @@ function readConf(file) {
 }
 
 /* Rewrites a key = value file: each key of set replaced or added, each key
- * of drop removed, the other lines kept as they are. Atomic (saveFile). */
+ * of drop removed (its key += value lines too), the other lines kept as they
+ * are. Atomic (saveFile). */
 function rewriteConf(file, set, drop) {
     var lines = [];
     try { lines = fs.readFileSync(file, 'utf8').split('\n'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
     var keys = Object.keys(set).concat(drop);
-    lines = lines.filter(function (l) { return !keys.some(function (k) { return new RegExp('^\\s*' + k + '\\s*=').test(l); }); });
+    lines = lines.filter(function (l) { return !keys.some(function (k) { return new RegExp('^\\s*' + k + '\\s*\\+?\\s*=').test(l); }); });
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
     Object.keys(set).forEach(function (k) { lines.push(k + ' = ' + set[k]); });
     saveFile(file, lines.length ? lines.join('\n') + '\n' : '');
@@ -292,6 +304,30 @@ function moveMapSettings() {
             return k + (k in move ? ' ' + move[k] : ' dropped');
         }).join(', '));
     } catch (e) { log('moving the map settings out of ' + LOCAL_CONF + ' failed: ' + e.message); }
+}
+
+/* Moves any of FEATURE_KEYS found in LOCAL_CONF into FEATURES, a valid
+ * value already there kept and one other than 0 or 1 dropped. LOCAL_CONF is
+ * rewritten first, its other lines kept: cut short between the two writes,
+ * the setting is lost but LOCAL_CONF is one every release starts with.
+ * True when LOCAL_CONF holds none of FEATURE_KEYS. */
+function moveFeatures() {
+    var local = readConf(LOCAL_CONF), feat = readConf(FEATURES), move = {};
+    var found = FEATURE_KEYS.filter(function (k) { return k in local; });
+    if (!found.length) return true;
+    function value(v) { return v.replace(/\s*#.*$/, ''); }
+    found.forEach(function (k) {
+        var v = value(local[k]);
+        if (!(k in feat && /^[01]$/.test(value(feat[k]))) && /^[01]$/.test(v)) move[k] = v;
+    });
+    try {
+        rewriteConf(LOCAL_CONF, {}, FEATURE_KEYS);
+        if (Object.keys(move).length) rewriteConf(FEATURES, move, []);
+        log('opt-in settings moved from ' + LOCAL_CONF + ' to ' + FEATURES + ': ' + found.map(function (k) {
+            return k + (k in move ? ' ' + move[k] : ' dropped');
+        }).join(', '));
+    } catch (e) { log('moving the opt-in settings out of ' + LOCAL_CONF + ' failed: ' + e.message); }
+    return !FEATURE_KEYS.some(function (k) { return k in readConf(LOCAL_CONF); });
 }
 
 /* A HUD offset: a whole number in -800..800. */
@@ -790,6 +826,16 @@ function recovered(target) {
     return rec && rec.by === 'recovery' ? rec.fails || 1 : null;
 }
 
+/* Why boot recovery restored the original aapd on disk now: 'crash' (the
+ * patched aapd crashed) or 'boot' (failed head-unit starts), and the patch
+ * revision it removed
+ * (aapd_patch.js PATCH_REV, 1 for a record without one); null otherwise. */
+function recoveredAa() {
+    var rec = record.current(AAPD);
+    return rec && rec.by === 'recovery' ? { why: rec.why === 'crash' ? 'crash' : 'boot', rev: rec.rev || 1 } : null;
+}
+var AA_PATCH_REV = require('./aapd_patch.js').PATCH_REV;
+
 /* The Android Auto patch as aapd_patch.js status reads it: { state:
  * original | patched | unknown | absent, reason, conflict, pending, dpi (the
  * density on disk), density (the chosen one), restorable, backup, known,
@@ -824,7 +870,9 @@ function readAaState(cb, fresh) {
             done(st);
             return;
         }
-        var edits = ['gate', 'selfstart-call', 'selfstart-guard', 'screen'].map(get), geom = get('geometry');
+        /* OUTDATED: an edit of ours as an earlier release wrote it, which
+         * an apply brings up to date. */
+        var edits = ['gate', 'selfstart-call', 'selfstart-guard', 'screen'].map(get).map(function (e) { return e === 'OUTDATED' ? 'PATCHED' : e; }), geom = get('geometry');
         st.ours = edits.indexOf('PATCHED') >= 0 || /^PATCHED/.test(geom);
         var dpi = /^PATCHED \((\d+) dpi, card (\w+)/.exec(geom), coding = /^KI_KOMBI_VARIANT (\d+)$/.exec(get('coding'));
         var backup = get('backup') !== 'none', known = !/^NO/.test(get('known')), pristine = /^yes, pristine/.test(get('known'));
@@ -849,6 +897,8 @@ function readAaState(cb, fresh) {
             : confWhy && !backup ? 'aapd.conf not usable: ' + confWhy[1]
             : foreignStart(AA) || (!backup && !proven ? 'untested aapd build' : null));
         st.recovered = recovered(AAPD);
+        var ra = recoveredAa();
+        if (ra) { st.recoveredWhy = ra.why; st.recoveredRev = ra.rev; }
         var pending = readPending(AA);
         if (pending) {
             st.state = 'unknown'; st.reason = pending.reason; st.aapd = 'deferred'; st.pending = pending.action || 'apply'; st.pendingBy = pending.by;
@@ -887,7 +937,7 @@ function aaMsg(st) {
     var m = { state: busy === 'aa' ? 'busy' : st.state, density: st.density, card: st.card, densities: [aapdConf.DENSITY_MIN, aapdConf.DENSITY_MAX, aapdConf.DENSITY_STEP],
               removable: !!st.restorable };
     /* While a change runs, the line says so; the values on disk stay. */
-    if (busy !== 'aa') ['reason', 'conflict', 'aapd', 'recovered'].forEach(function (k) { if (st[k]) m[k] = st[k]; });
+    if (busy !== 'aa') ['reason', 'conflict', 'aapd', 'recovered', 'recoveredWhy'].forEach(function (k) { if (st[k]) m[k] = st[k]; });
     ['pending', 'dpi', 'diskCard'].forEach(function (k) { if (st[k]) m[k] = st[k]; });
     if (st.pending && st.run !== undefined) { m.runDpi = st.run ? st.run.dpi : null; m.runCard = st.run ? st.run.card : null; }
     if (lastDensityAt + DENSITY_SPACING_MS > Date.now()) m.changeAt = lastDensityAt + DENSITY_SPACING_MS;
@@ -1590,8 +1640,8 @@ function aaRevert(noRestart, dropBackup, done) {
 function saveFile(f, text) {
     try { fs.mkdirSync(STATE_DIR, 0o755); } catch (e) { if (e.code !== 'EEXIST') throw e; }
     var fd = fs.openSync(f + '.tmp', 'w', 0o644);
-    /* The capture (hmi_5000) reads waze-on-cluster.local.conf and the map
-     * settings, whatever umask the caller (an install hook) has. */
+    /* The render (hmi_5000) reads the map settings, and an earlier version
+     * the local conf, whatever umask the caller (an install hook) has. */
     try { fs.fchmodSync(fd, 0o644); fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(f + '.tmp', f);
 }
@@ -1888,7 +1938,8 @@ function ensureDir(dir) {
  * a patch of ours, any configuration of it, which the patcher brings up to
  * date or leaves as it is; an original with our backup was reverted by the
  * user and stays so (reset applies it: highfReset), a patch boot recovery
- * removed stays so whatever is left of it, as does a pending change other
+ * removed stays so whatever is left of it (an Android Auto patch of an
+ * older revision than this release's is applied again), as does a pending change other
  * than a removal's revert. After a removal's revert an install patches a proven build again;
  * a build outside the proven list, its backup dropped, stays reverted (a
  * conflict). deactivate reverts a patch of ours, a pending one too, also one
@@ -1900,12 +1951,16 @@ function plan(which, st, name, reset) {
         return { why: 'a change already waits for the next head-unit start' };
     }
     if (which === 'deactivate' && st.restorable) return { op: 'revert' };
-    if (which === 'activate' && st.recovered) {
-        return { why: 'boot recovery removed the patch after ' + st.recovered + ' failed head-unit start' + (st.recovered === 1 ? '' : 's') + '; its Patch button applies it' };
+    /* Android Auto's: also a crash of the patched aapd; an install with a
+     * newer patch revision than the removed one applies it again. */
+    var retry = which === 'activate' && !!st.recovered && !!st.recoveredRev && st.recoveredRev < AA_PATCH_REV;
+    if (which === 'activate' && st.recovered && !retry) {
+        return { why: st.recoveredWhy === 'crash' ? 'boot recovery removed the patch after the patched aapd crashed; its Patch button applies it'
+            : 'boot recovery removed the patch after ' + st.recovered + ' failed head-unit start' + (st.recovered === 1 ? '' : 's') + '; its Patch button applies it' };
     }
     if (st.conflict && (which === 'activate' || !st.known || st.otherBuild)) return { conflict: st.conflict };
     if (which === 'deactivate') return st.binary === 'original' && !st.backup ? { why: name + ' is the original' } : { op: 'revert' };
-    if (st.binary === 'original' && st.backup) return reset ? { op: 'apply', reset: true } : { why: 'the patch was turned off; its Patch button applies it' };
+    if (st.binary === 'original' && st.backup) return reset ? { op: 'apply', reset: true } : retry ? { op: 'apply' } : { why: 'the patch was turned off; its Patch button applies it' };
     return { op: 'apply' };
 }
 
@@ -2087,6 +2142,15 @@ function oneShot(which) {
             process.exit(code);
         });
     }
+    /* A version this one gives way to refuses to start with an opt-in key in
+     * LOCAL_CONF: while one stays there the removal or the change is
+     * refused, nothing else done. */
+    if (!moveFeatures() && which === 'deactivate') {
+        result.status = 'the opt-in settings could not be moved out of ' + LOCAL_CONF + '; nothing changed';
+        log(which + ': ' + result.status);
+        process.stdout.write(JSON.stringify(result) + '\n');
+        process.exit(1);
+    }
     if (which === 'deactivate') markBy = 'removal';
     else moveMapSettings();
     highfInstall = which === 'activate' && headUnit.variant() === 'HIGHF';
@@ -2142,6 +2206,7 @@ function listenLogs() {
 function main() {
     var dir = path.dirname(SOCK);
     ensureDir(dir);
+    moveFeatures();
     moveMapSettings();
     loadProfiles();
     try { if (fs.lstatSync(SOCK)) fs.unlinkSync(SOCK); } catch (e) {}

@@ -15,13 +15,14 @@
 #   woc-patch.sh apply  high --res <WxH|stock>  # the display size advertised to the phone
 #                                               # (default 1088x480; goes with any sink form)
 #   woc-patch.sh apply  high --safe <WxH+X+Y|full>  # the safe area the phone keeps its
-#                                               # guidance UI in (default 476x306+306+72)
+#                                               # guidance UI in (default 504x368+286+72)
 #   woc-patch.sh apply  high|mid --unproven     # also the first patch of a build outside
 #                                               # the proven list, and a patch on a car
 #                                               # not coded KI_KOMBI_VARIANT 7 (PATCH.md)
 #   woc-patch.sh revert
 #   woc-patch.sh verify
 #   woc-patch.sh aa-status                      # Android Auto's patch: aapd and aapd.conf
+#   woc-patch.sh aa-probe [<file>]              # where its edit sites are in aapd, read-only
 #   woc-patch.sh aa-revert                      # restore both
 #
 # revert and aa-revert restore from our verified backups; on carplay
@@ -117,6 +118,7 @@ case "$cmd" in
   aa-status)
     # shellcheck disable=SC2086
     exec "$NODE" "$AA_PATCHER" status $AA_FILES ;;
+  aa-probe) exec "$NODE" "$AA_PATCHER" probe "$@" ;;
   aa-revert)
     # Extra flags pass through (--force restores over another aapd build).
     trap 'sync; "$MOUNT" -o remount,ro / 2>/dev/null || true' EXIT INT TERM HUP
@@ -127,6 +129,6 @@ case "$cmd" in
     echo "Reverted. $(aa_activation)"
     ;;
   *)
-    echo "usage: woc-patch.sh status|probe [<file>]|apply high|mid [--capture|--sink <url>|--avb] [--res <WxH|stock>] [--safe <WxH+X+Y|full>] [--unproven]|revert|verify|aa-status|aa-revert" >&2
+    echo "usage: woc-patch.sh status|probe [<file>]|apply high|mid [--capture|--sink <url>|--avb] [--res <WxH|stock>] [--safe <WxH+X+Y|full>] [--unproven]|revert|verify|aa-status|aa-probe [<file>]|aa-revert" >&2
     exit 2 ;;
 esac
