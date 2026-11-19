@@ -1,4 +1,4 @@
-# tjm-waze
+# mntader-waze
 
 The MNTADER Store's source for the CarPlay / Android Auto map on the instrument cluster: **MNTADER Waze
 Cluster** (the HMI app), **waze-on-cluster** (the Waze tool) and **cluster-render** (the cluster
